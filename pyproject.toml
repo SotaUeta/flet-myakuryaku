@@ -1,0 +1,26 @@
+[project]
+name = "flet-myakuryaku"
+version = "0.1.0"
+description = "Flet Contexto Application"
+readme = "README.md"
+requires-python = ">=3.8"
+dependencies = [
+  "flet==0.28.3",
+  "gensim",
+  "sudachipy>=0.4.0",
+  "sudachidict_core>=20240109",
+  "certifi",
+  "numpy"
+]
+
+[tool.flet]
+org = "com.mycompany"
+product = "flet-myakuryaku"
+company = "Flet"
+copyright = "Copyright (C) 2024 by Flet"
+
+[tool.flet.app]
+include = [
+  "sudachidict_core",
+  "chive-1.3-mc90_gensim"
+]
