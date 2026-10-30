@@ -50,7 +50,7 @@ def main(page: ft.Page):
         log_error(error_msg, e)
         page.add(ft.Text(
             f"ゲームの初期化に失敗しました。\nエラー: {str(e)}\n\nログファイルを確認してください。",
-            color=ft.colors.RED,
+            color=ft.Colors.RED,
             size=14
         ))
         page.update()
@@ -62,7 +62,7 @@ def main(page: ft.Page):
         log_error(error_msg)
         page.add(ft.Text(
             "ゲームの初期化に失敗しました。モデルファイルを確認してください。\n\nログファイルを確認してください。",
-            color=ft.colors.RED,
+            color=ft.Colors.RED,
             size=14
         ))
         page.update()
