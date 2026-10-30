@@ -20,3 +20,8 @@ python scripts/precompute_ranks_cl.py
 
 結果は `src/rank_data/` に保存されます。お題リスト（`FIXED_WORD_LIST`）や `TOP_N_CANDIDATES` を変えたときは再実行してください。
 `src/rank_data/` が無い場合は、従来どおりゲームごとにモデルから計算します。
+
+## Sudachi のバージョン
+
+chiVe v1.3 は Sudachi v0.6.8・Sudachi 辞書 20240109-core で作られているため、`pyproject.toml` でも同じバージョンに固定しています。
+バージョンが違うと正規化の結果が変わり、順位表にある単語が圏外になることがあります。バージョンを変えたときは `rank_data` を作り直してください。
