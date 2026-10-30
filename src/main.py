@@ -341,8 +341,9 @@ def main(page: ft.Page):
                 snack_bar = ft.SnackBar(ft.Text("⚠️ これ以上、未回答の単語からヒントを提供できません。"))
                 page.overlay.append(snack_bar)
         elif e.control.data == "give_up":
-            # ギブアップ処理の例
-            page.overlay.append(confirm_give_up_dialog)
+            # 同じダイアログを2回追加すると、閉じたあとも見えないダイアログが残って操作できなくなるため、1回だけ追加する
+            if confirm_give_up_dialog not in page.overlay:
+                page.overlay.append(confirm_give_up_dialog)
             confirm_give_up_dialog.open = True
         page.update()
         if e.control.data == "hint":
