@@ -130,6 +130,7 @@ def main(page: ft.Page):
             )
 
         # ダイアログの内容を更新
+        closest_words_dialog.title.value = target_word
         closest_words_dialog.content.content.controls = dialog_content_controls
         
         # ダイアログを表示（重複追加を防止）
@@ -138,20 +139,27 @@ def main(page: ft.Page):
         closest_words_dialog.open = True
         page.update()
 
-    closest_words_button = ft.Container(
-        content=ft.TextButton(
+    def end_of_game_button(icon, label, on_click):
+        return ft.TextButton(
             content=ft.Row([
-                ft.Icon(ft.Icons.VISIBILITY, size=24),
-                ft.Text("類似単語", size=18, weight=ft.FontWeight.W_600),
+                ft.Icon(icon, size=24),
+                ft.Text(label, size=18, weight=ft.FontWeight.W_600),
             ], alignment=ft.MainAxisAlignment.CENTER, spacing=10),
-            on_click=show_closest_words,
+            on_click=on_click,
             style=ft.ButtonStyle(
                 shape=ft.RoundedRectangleBorder(radius=8),
                 bgcolor=ft.Colors.BLUE_700,
                 color=ft.Colors.WHITE,
                 padding=ft.padding.symmetric(vertical=12, horizontal=20)
             )
-        ),
+        )
+
+    # ゲーム終了時に表示するボタン（類似単語・次のゲーム）
+    closest_words_button = ft.Container(
+        content=ft.Row([
+            end_of_game_button(ft.Icons.VISIBILITY, "類似単語", show_closest_words),
+            end_of_game_button(ft.Icons.REPLAY, "次のゲーム", lambda e: start_new_game()),
+        ], alignment=ft.MainAxisAlignment.CENTER, spacing=10),
         alignment=ft.alignment.center,
         padding=ft.padding.only(top=5, bottom=10),
         visible=False # 初期状態では非表示
@@ -352,6 +360,38 @@ def main(page: ft.Page):
         border=ft.border.all(2),
         visible=False,
     )
+
+    def start_new_game():
+        nonlocal target_word, rank_map, answer_count, hint_count, game_clear
+
+        # 直前と同じお題にならないようにして次のお題を用意する
+        new_game_data = game_logic.initialize_game_data(exclude_target=target_word)
+        if not new_game_data:
+            status_message.value = "⚠️ 次のお題を用意できませんでした。"
+            status_hint_container.bgcolor = ft.Colors.RED_100
+            status_hint_container.border = ft.border.all(2, ft.Colors.RED_700)
+            update_status_visibility()
+            page.update()
+            return
+
+        target_word = new_game_data['target_word']
+        rank_map = new_game_data['rank_map']
+        answer_count = 0
+        hint_count = 0
+        guessed_words.clear()
+        game_clear = False
+
+        count_text.value = f"回答回数: {answer_count}"
+        hint_text.value = f"ヒント回数: {hint_count}"
+        status_message.value = f"お題が選ばれました。（初期設定: {new_game_data['setup_time']:.2f} 秒）"
+        status_hint_container.bgcolor = ft.Colors.CYAN_50
+        status_hint_container.border = ft.border.all(2, ft.Colors.CYAN_700)
+        closest_words_button.visible = False
+        last_input_container.visible = False
+        lv.controls.clear()
+        input_box.value = ""
+        update_status_visibility()
+        page.update()
 
     def update_status_visibility():
         status_hint_container.visible = status_message.value.strip() != ""

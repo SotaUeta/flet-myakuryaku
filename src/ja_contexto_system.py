@@ -27,6 +27,9 @@ except Exception:
     np = None  # type: ignore
     HAS_NUMPY = False
 import time 
+import functools
+import gzip
+import json
 from typing import List, Tuple, Dict, Set, Optional
 import os
 
@@ -44,7 +47,11 @@ MODEL_PATH = os.path.join(
     BASE_DIR, 
     'chive-1.3-mc90_gensim', 
     'chive-1.3-mc90.kv'
-)# ユーザー指定の出題リスト
+)
+# 事前計算した類似度順位の置き場所（scripts/precompute_ranks_cl.py が生成する）
+RANK_DATA_DIR = os.path.join(BASE_DIR, 'rank_data')
+RANK_INDEX_PATH = os.path.join(RANK_DATA_DIR, 'index.json')
+# ユーザー指定の出題リスト
 FIXED_WORD_LIST = ['犬', '猫', '鳥', '魚', '象', '馬', '牛', '豚', '羊', '猿', '兎', 
                     '鼠', '蛙', '蛇', '蜘蛛', '蟻', '蝶', '蜂', '蟹', '海老', '花', '木', 
                     '草', '葉', '林檎', '種', '森', '山', '川', '海', '空', '雲', '雨', 
@@ -167,49 +174,63 @@ class SimpleKeyedVectors:
         # ダミーモデルでは固定の擬似スコアを返す（下の DUMMY_TOP_LIST_DOG を使用）
         return []
 
-try:
-    print(f"モデル '{MODEL_PATH}' をロード中...")
-    if HAS_GENSIM:
-        model = gensim.models.KeyedVectors.load(MODEL_PATH)  # type: ignore[attr-defined]
-        MODEL_LOADED = True
-        print("モデルロード完了。")
-    else:
-        raise FileNotFoundError("gensim 不在のためロード不可（Web フォールバックへ）")
-except Exception:
-    print(f"⚠️ 警告: モデルファイルが見つかりません ('{MODEL_PATH}')。ダミーモデルを使用します。")
-    MODEL_LOADED = False
-    
-    # ダミーモデルの作成 (ゲーム実行に必要な最低限の語彙とリスト)
-    ALL_VOCAB = FIXED_WORD_LIST + ['トマト', 'ミカン', 'バナナ', 'キャベツ', 'キュウリ', 'ナス', '💧', '走る', '美しい', 'じゃがいも', 'ジャガ芋']
-    # 実モデルが 365 次元なのでダミーも同次元に合わせる
-    model = SimpleKeyedVectors(vector_size=365) if not HAS_GENSIM else gensim.models.KeyedVectors(vector_size=365)  # type: ignore[attr-defined]
+# モデルは事前計算データ（rank_data/）が無いときと、事前計算スクリプトからだけ使う。
+# 起動を速くするため import 時には読み込まず、load_model() で初めて読み込む。
+model = None
+MODEL_LOADED = False
+USING_DUMMY_MODEL = False
+DUMMY_NORM_MAP: Dict[str, str] = {}
 
-    def _rand_vec(n: int) -> List[float]:
-        if HAS_NUMPY:
-            return [float(x) for x in np.random.rand(n)]  # type: ignore[attr-defined]
-        import random as _random
-        return [_random.random() for _ in range(n)]
+def load_model():
+    """ モデルを一度だけロードして返します。ロードできない場合はダミーモデルを返します。 """
+    global model, MODEL_LOADED, USING_DUMMY_MODEL, DUMMY_NORM_MAP
+    if model is not None:
+        return model
+    try:
+        print(f"モデル '{MODEL_PATH}' をロード中...")
+        if HAS_GENSIM:
+            model = gensim.models.KeyedVectors.load(MODEL_PATH)  # type: ignore[attr-defined]
+            MODEL_LOADED = True
+            print("モデルロード完了。")
+        else:
+            raise FileNotFoundError("gensim 不在のためロード不可（Web フォールバックへ）")
+    except Exception:
+        print(f"⚠️ 警告: モデルファイルが見つかりません ('{MODEL_PATH}')。ダミーモデルを使用します。")
+        MODEL_LOADED = False
+        USING_DUMMY_MODEL = True
+    
+        # ダミーモデルの作成 (ゲーム実行に必要な最低限の語彙とリスト)
+        ALL_VOCAB = FIXED_WORD_LIST + ['トマト', 'ミカン', 'バナナ', 'キャベツ', 'キュウリ', 'ナス', '💧', '走る', '美しい', 'じゃがいも', 'ジャガ芋']
+        # 実モデルが 365 次元なのでダミーも同次元に合わせる
+        model = SimpleKeyedVectors(vector_size=365) if not HAS_GENSIM else gensim.models.KeyedVectors(vector_size=365)  # type: ignore[attr-defined]
 
-    for i, word in enumerate(ALL_VOCAB):
-        model.add_vector(word, _rand_vec(365))
+        def _rand_vec(n: int) -> List[float]:
+            if HAS_NUMPY:
+                return [float(x) for x in np.random.rand(n)]  # type: ignore[attr-defined]
+            import random as _random
+            return [_random.random() for _ in range(n)]
+
+        for i, word in enumerate(ALL_VOCAB):
+            model.add_vector(word, _rand_vec(365))
     
-    # '犬'がお題の場合のダミー類似度リストを固定で作成 (絵文字の'💧'と動詞の'走る'を含む)
-    DUMMY_TOP_LIST_DOG = [
-        ('猫', 0.95), ('走る', 0.88), ('トマト', 0.85), 
-        ('美しい', 0.80), # 形容詞
-        ('💧', 0.60), 
-        ('バナナ', 0.50), ('キャベツ', 0.45), 
-    ]
+        # '犬'がお題の場合のダミー類似度リストを固定で作成 (絵文字の'💧'と動詞の'走る'を含む)
+        DUMMY_TOP_LIST_DOG = [
+            ('猫', 0.95), ('走る', 0.88), ('トマト', 0.85), 
+            ('美しい', 0.80), # 形容詞
+            ('💧', 0.60), 
+            ('バナナ', 0.50), ('キャベツ', 0.45), 
+        ]
     
-    # get_normalized_token()のテスト用ダミー
-    DUMMY_NORM_MAP = {'じゃがいも': 'ジャガ芋', 'ジャガイモ': 'ジャガ芋', '犬': '犬'}
+        # get_normalized_token()のテスト用ダミー
+        DUMMY_NORM_MAP = {'じゃがいも': 'ジャガ芋', 'ジャガイモ': 'ジャガ芋', '犬': '犬'}
     
-    def dummy_most_similar(key, topn=10):
-        if key in [get_normalized_token(w) for w in FIXED_WORD_LIST]:
-            return DUMMY_TOP_LIST_DOG
-        return []
+        def dummy_most_similar(key, topn=10):
+            if key in [get_normalized_token(w) for w in FIXED_WORD_LIST]:
+                return DUMMY_TOP_LIST_DOG
+            return []
         
-    model.most_similar = dummy_most_similar
+        model.most_similar = dummy_most_similar
+    return model
 
 
 # --- 3. ヘルパー関数 ---
@@ -218,7 +239,7 @@ def get_normalized_token(text: str) -> Optional[str]:
     """ Sudachiで解析し、モデルの語彙に合う可能性の高い標準形を返します。
         解析不能な場合は None を返します。
     """
-    if not MODEL_LOADED and text in DUMMY_NORM_MAP:
+    if USING_DUMMY_MODEL and text in DUMMY_NORM_MAP:
         # ダミーモードでの正規化テスト用
         return DUMMY_NORM_MAP.get(text)
         
@@ -228,6 +249,7 @@ def get_normalized_token(text: str) -> Optional[str]:
     # フォールバック: そのまま返す（テスト用にダミー正規化マップを優先）
     return text
 
+@functools.lru_cache(maxsize=None)
 def is_proper_noun(word: str) -> bool:
     """ Sudachiの品詞情報に基づき、単語が固有名詞であるかを判定します。 """
     if HAS_SUDACHI and tokenizer_obj is not None and mode is not None:
@@ -252,14 +274,43 @@ def has_emoji(text: str) -> bool:
 # ゲームの状態を保持するためのクラスや辞書は使用せず、
 # UI側が必要なデータを取得できる関数を定義します。
 
-def initialize_game_data() -> Dict[str, any]:
+_rank_index: Optional[List[Dict[str, str]]] = None
+
+def load_rank_index() -> List[Dict[str, str]]:
+    """ 事前計算データの目次（お題と順位ファイル名の一覧）を返します。無ければ空リストを返します。 """
+    global _rank_index
+    if _rank_index is None:
+        _rank_index = []
+        if os.path.exists(RANK_INDEX_PATH):
+            with open(RANK_INDEX_PATH, encoding='utf-8') as f:
+                index = json.load(f)
+            if index.get('top_n') != TOP_N_CANDIDATES:
+                print(f"⚠️ 事前計算データの top_n ({index.get('top_n')}) が TOP_N_CANDIDATES と異なります。再生成してください。")
+            _rank_index = index.get('targets', [])
+    return _rank_index
+
+def load_rank_words(file_name: str) -> List[str]:
+    """ 事前計算した順位ファイルを読み込み、順位順の単語リスト（先頭はお題）を返します。 """
+    with gzip.open(os.path.join(RANK_DATA_DIR, file_name), 'rt', encoding='utf-8') as f:
+        return f.read().split('\n')
+
+def initialize_game_data(exclude_target: Optional[str] = None) -> Dict[str, any]:
     """ ゲームの初期化を行い、お題と順位付けに必要なデータを返します。
+        exclude_target を指定すると、その単語以外からお題を選びます（連続で同じお題にしないため）。
         エラー時は空の辞書を返すか、例外を投げます。
     """
     try:
         start_time = time.time()
-        # お題と順位付けの元になるリストを生成
-        target_word_norm, top_rank_list = select_target_word_and_list(model)
+        targets = load_rank_index()
+        if targets:
+            candidates = [t for t in targets if t['word'] != exclude_target] or targets
+            entry = random.choice(candidates)
+            target_word_norm = entry['word']
+            # 事前計算データには類似度を保存していないため None とする
+            top_rank_list = [(word, None) for word in load_rank_words(entry['file'])]
+        else:
+            # 事前計算データが無い場合はその場で計算する（時間がかかる）
+            target_word_norm, top_rank_list = select_target_word_and_list(load_model(), exclude_target)
     except Exception as e:
         print(f"ゲームの初期化に失敗しました: {e}", file=sys.stderr)
         return {}
@@ -276,10 +327,15 @@ def initialize_game_data() -> Dict[str, any]:
         'setup_time': setup_time,
     }
 
-def select_target_word_and_list(model) -> Tuple[str, List[Tuple[str, float]]]:
+def select_target_word_and_list(model, exclude_target: Optional[str] = None) -> Tuple[str, List[Tuple[str, float]]]:
     """ 固定リストからお題を選択し、その単語に対する類似度トップリストを作成します。 """
     
-    target_word_surface = random.choice(FIXED_WORD_LIST)
+    candidates = [w for w in FIXED_WORD_LIST if get_normalized_token(w) != exclude_target] or FIXED_WORD_LIST
+    return build_rank_list(model, random.choice(candidates))
+
+def build_rank_list(model, target_word_surface: str) -> Tuple[str, List[Tuple[str, float]]]:
+    """ 指定したお題に対する類似度トップリストを作成します。事前計算スクリプトからも使います。 """
+    
     target_word = get_normalized_token(target_word_surface)
     
     if target_word is None or target_word not in model.index_to_key:
@@ -289,12 +345,14 @@ def select_target_word_and_list(model) -> Tuple[str, List[Tuple[str, float]]]:
     # 類似語リストの生成
     raw_top_list = model.most_similar(target_word, topn=TOP_N_CANDIDATES * 2)
     
-    # トップリストからお題自体、固有名詞、絵文字を除外
+    # トップリストからお題自体、固有名詞、絵文字、改行を含む語を除外
     filtered_list = []
     for word, score in raw_top_list:
         if word == target_word:
             continue
         if is_proper_noun(word) or has_emoji(word):
+            continue
+        if '\n' in word or '\r' in word:
             continue
             
         filtered_list.append((word, score))
@@ -435,6 +493,8 @@ def start_game():
     for i, (word, score) in enumerate(top_50_list):
         if i == 0:
             print(f"  {i+1:>6}位 (お題): {word}")
+        elif score is None:
+            print(f"  {i+1:>6}位: {word}")
         else:
             print(f"  {i+1:>6}位: {word} (類似度: {score:.4f})")
             
