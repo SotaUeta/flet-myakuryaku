@@ -194,8 +194,9 @@ def load_model():
             print("モデルロード完了。")
         else:
             raise FileNotFoundError("gensim 不在のためロード不可（Web フォールバックへ）")
-    except Exception:
-        print(f"⚠️ 警告: モデルファイルが見つかりません ('{MODEL_PATH}')。ダミーモデルを使用します。")
+    except Exception as e:
+        print(f"⚠️ 警告: モデルをロードできませんでした ('{MODEL_PATH}'): {e}")
+        print("   ダミーモデルを使用します。")
         MODEL_LOADED = False
         USING_DUMMY_MODEL = True
     
