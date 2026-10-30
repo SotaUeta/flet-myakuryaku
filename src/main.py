@@ -390,6 +390,7 @@ def main(page: ft.Page):
         input_box.value = ""
         update_status_visibility()
         page.update()
+        input_box.focus()
 
     def update_status_visibility():
         status_hint_container.visible = status_message.value.strip() != ""
@@ -500,14 +501,20 @@ def main(page: ft.Page):
             update_status_visibility()
             page.update()
 
+    def submit_input(e):
+        add_item_to_list(e, is_hint=False)
+        # Enter で送信すると入力欄のフォーカスが外れるため、続けて入力できるよう戻す
+        input_box.focus()
+
     input_box = ft.TextField(
         label="単語を入力してください",
         suffix=ft.IconButton(
             icon = ft.Icons.SEND,
             tooltip="送信",
-            on_click=lambda e: add_item_to_list(e, is_hint=False),
+            on_click=submit_input,
         ),
-        on_submit=lambda e: add_item_to_list(e, is_hint=False),
+        on_submit=submit_input,
+        autofocus=True,
     )
 
     lv = ft.ListView(
