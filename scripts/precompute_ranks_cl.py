@@ -48,16 +48,15 @@ def main():
     targets = []
     skipped = []
     start_time = time.time()
-    for surface in game_logic.FIXED_WORD_LIST:
-        target_word = game_logic.get_normalized_token(surface)
-        if any(t['word'] == target_word for t in targets):
-            continue  # 重複（正規化後に同じになるものを含む）
+    for surface in dict.fromkeys(game_logic.FIXED_WORD_LIST):
         try:
             target_word, top_rank_list = game_logic.build_rank_list(model, surface)
         except ValueError as e:
             print(f"スキップ: {e}")
             skipped.append(surface)
             continue
+        if any(t['word'] == target_word for t in targets):
+            continue  # 正規化後に同じ単語になるお題は1つにまとめる
 
         file_name = f"{len(targets):03d}.txt.gz"
         with gzip.open(os.path.join(out_dir, file_name), 'wt', encoding='utf-8') as f:

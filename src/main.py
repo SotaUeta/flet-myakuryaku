@@ -411,7 +411,7 @@ def main(page: ft.Page):
             normalized_input = result['normalized']
 
             if result['status'] == 'error':
-                status_message.value = f"⚠️ 解析エラー: {result['message']}"
+                status_message.value = f"⚠️ {result['message']}"
                 status_hint_container.bgcolor = ft.Colors.RED_100
                 status_hint_container.border = ft.border.all(2, ft.Colors.RED_700)
                 update_status_visibility()

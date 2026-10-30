@@ -236,19 +236,31 @@ def load_model():
 
 # --- 3. ヘルパー関数 ---
 
-def get_normalized_token(text: str) -> Optional[str]:
-    """ Sudachiで解析し、モデルの語彙に合う可能性の高い標準形を返します。
-        解析不能な場合は None を返します。
-    """
+def get_normalized_forms(text: str) -> List[str]:
+    """ Sudachiで解析し、各語の正規化表記をリストで返します。解析不能な場合は空リストを返します。 """
     if USING_DUMMY_MODEL and text in DUMMY_NORM_MAP:
         # ダミーモードでの正規化テスト用
-        return DUMMY_NORM_MAP.get(text)
+        return [DUMMY_NORM_MAP[text]]
         
     if HAS_SUDACHI and tokenizer_obj is not None and mode is not None:
-        tokens = tokenizer_obj.tokenize(text, mode)
-        return tokens[0].normalized_form() if tokens else None
+        return [token.normalized_form() for token in tokenizer_obj.tokenize(text, mode)]
     # フォールバック: そのまま返す（テスト用にダミー正規化マップを優先）
-    return text
+    return [text]
+
+def get_normalized_token(text: str) -> Optional[str]:
+    """ Sudachiで解析し、モデルの語彙に合う可能性の高い標準形を返します。
+        複数の語に分かれる場合は、各語の正規化表記をつなげて返します（例: 'たつた' → 'たつ'+'た'）。
+        解析不能な場合は None を返します。
+    """
+    forms = get_normalized_forms(text)
+    return ''.join(forms) if forms else None
+
+def get_word_candidates(text: str) -> List[str]:
+    """ 入力に対応する単語の表記の候補を、優先順（正規化表記、入力そのまま）に返します。 """
+    normalized = get_normalized_token(text)
+    if normalized is None:
+        return []
+    return list(dict.fromkeys([normalized, text]))
 
 @functools.lru_cache(maxsize=None)
 def is_proper_noun(word: str) -> bool:
@@ -337,10 +349,11 @@ def select_target_word_and_list(model, exclude_target: Optional[str] = None) -> 
 def build_rank_list(model, target_word_surface: str) -> Tuple[str, List[Tuple[str, float]]]:
     """ 指定したお題に対する類似度トップリストを作成します。事前計算スクリプトからも使います。 """
     
-    target_word = get_normalized_token(target_word_surface)
+    candidates = get_word_candidates(target_word_surface)
+    target_word = next((word for word in candidates if word in model.index_to_key), None)
     
-    if target_word is None or target_word not in model.index_to_key:
-         raise ValueError(f"お題候補 '{target_word_surface}' ({target_word}) はモデルの語彙にありません。")
+    if target_word is None:
+         raise ValueError(f"お題候補 '{target_word_surface}' ({' / '.join(candidates)}) はモデルの語彙にありません。")
 
 
     # 類似語リストの生成
@@ -368,12 +381,22 @@ def build_rank_list(model, target_word_surface: str) -> Tuple[str, List[Tuple[st
 def check_guess(user_input: str, target_word: str, rank_map: Dict[str, int]) -> Dict[str, any]:
     """ ユーザーの入力単語をチェックし、結果（正規化単語、順位、正解/不正解）を返します。
     """
-    normalized_input = get_normalized_token(user_input)
+    candidates = get_word_candidates(user_input)
     
-    if normalized_input is None:
+    if not candidates:
         return {'status': 'error', 'message': f"'{user_input}' は解析できませんでした。", 'normalized': None}
     
-    return check_normalized_word(normalized_input, target_word, rank_map)
+    # お題か順位表にある表記が見つかれば、その単語として判定する
+    for candidate in candidates:
+        if candidate == target_word or candidate in rank_map:
+            return check_normalized_word(candidate, target_word, rank_map)
+    
+    # 複数の語に分かれ、どの表記も順位表に無い場合は、1語として扱えないため判定しない
+    forms = get_normalized_forms(user_input)
+    if len(forms) > 1:
+        return {'status': 'error', 'message': f"'{user_input}' は1つの単語として判定できません（{' / '.join(forms)} に分かれます）。", 'normalized': None}
+    
+    return check_normalized_word(candidates[0], target_word, rank_map)
 
 def check_normalized_word(normalized_input: str, target_word: str, rank_map: Dict[str, int]) -> Dict[str, any]:
     """ 正規化済みの単語（順位表の表記そのもの）を、正規化し直さずにチェックします。
@@ -448,6 +471,9 @@ def start_game():
             continue
 
         result = check_guess(user_input, target_word, rank_map)
+        if result['status'] == 'error':
+            print(f"⚠️ {result['message']}")
+            continue
         normalized_input = result.get('normalized')
         
         # --- 正規化結果の表示 (NEW) ---
