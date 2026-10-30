@@ -37,6 +37,8 @@ def log_error(error_msg: str, exception: Exception = None):
 def main(page: ft.Page):
     page.title = "ミャクリャク"
     page.vertical_alignment = ft.MainAxisAlignment.START
+    # OSのダークモード設定に関係なく、常にライトテーマで表示する
+    page.theme_mode = ft.ThemeMode.LIGHT
 
     #初期化
     try:
