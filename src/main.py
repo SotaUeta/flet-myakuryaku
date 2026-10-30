@@ -77,6 +77,7 @@ def main(page: ft.Page):
     # 推測した順の履歴（順位の推移グラフ用）。(単語, 順位, ヒントか) を持つ
     guess_history: List[Tuple[str, int, bool]] = []
     game_clear = False
+    grayscale = False  # ナフサ不足（白黒表示）中か
 
     #UI
     title_text = ft.Text(
@@ -114,7 +115,8 @@ def main(page: ft.Page):
         for word, rank in sorted_revealed:
             is_guessed = word in guessed_words
             if is_guessed:
-                    bg_color = ft.Colors.GREEN_100 # 回答済みは薄い緑
+                    # 回答済みは薄い緑（ナフサ不足中は灰色）
+                    bg_color = ft.Colors.GREY_300 if grayscale else ft.Colors.GREEN_100
             else:
                 bg_color = ft.Colors.WHITE # 未回答は白
 
@@ -346,6 +348,47 @@ def main(page: ft.Page):
         if e.control.data == "hint":
             input_box.focus()  # メニューに移ったフォーカスを入力欄に戻す
 
+    # ナフサ不足中のテーマ。基準色（color_scheme_seed）に灰色を指定しても主要な色には彩度が付くため、灰色を直接指定する
+    grayscale_theme = ft.Theme(color_scheme=ft.ColorScheme(
+        primary=ft.Colors.GREY_800,
+        on_primary=ft.Colors.WHITE,
+        primary_container=ft.Colors.GREY_300,
+        on_primary_container=ft.Colors.GREY_900,
+        secondary=ft.Colors.GREY_700,
+        on_secondary=ft.Colors.WHITE,
+        secondary_container=ft.Colors.GREY_300,
+        on_secondary_container=ft.Colors.GREY_900,
+        tertiary=ft.Colors.GREY_700,
+        on_tertiary=ft.Colors.WHITE,
+        surface=ft.Colors.GREY_50,
+        on_surface=ft.Colors.GREY_900,
+        on_surface_variant=ft.Colors.GREY_700,
+        surface_tint=ft.Colors.GREY_600,
+        surface_container_lowest=ft.Colors.WHITE,
+        surface_container_low=ft.Colors.GREY_100,
+        surface_container=ft.Colors.GREY_100,
+        surface_container_high=ft.Colors.GREY_200,
+        outline=ft.Colors.GREY_600,
+        outline_variant=ft.Colors.GREY_400,
+        inverse_surface=ft.Colors.GREY_800,
+        on_inverse_surface=ft.Colors.GREY_100,
+        inverse_primary=ft.Colors.GREY_300,
+    ))
+
+    def toggle_grayscale(e):
+        nonlocal grayscale
+        grayscale = not grayscale
+        # 彩度0の色を SATURATION で重ねると、その下に描かれるものが白黒になる
+        color_filter = ft.ColorFilter(color=ft.Colors.GREY, blend_mode=ft.BlendMode.SATURATION) if grayscale else None
+        root_container.color_filter = color_filter
+        # ダイアログは画面の上に重ねて表示されフィルターが届かないため、色を直接指定しているところを切り替える
+        # （類似単語ダイアログの中身は開くたびに作り直すので、そこで切り替える）
+        confirm_give_up_dialog.actions[0].style = ft.ButtonStyle(color=ft.Colors.GREY_900 if grayscale else ft.Colors.RED)
+        # メニューやダイアログの枠・ボタンはテーマの色で描かれるので、テーマも無彩色にする
+        page.theme = grayscale_theme if grayscale else None
+        page.update()
+        input_box.focus()
+
     menu_button = ft.PopupMenuButton(
         icon=ft.Icons.MENU,
         icon_size=30,
@@ -372,6 +415,18 @@ def main(page: ft.Page):
                         [
                             ft.Icon(ft.Icons.FLAG),
                             ft.Text("お手上げ", weight=ft.FontWeight.W_500),
+                        ],
+                    ),
+                    padding=8,
+                )
+            ),
+            ft.PopupMenuItem(
+                on_click=toggle_grayscale,
+                content=ft.Container(
+                    ft.Row(
+                        [
+                            ft.Icon(ft.Icons.INVERT_COLORS),
+                            ft.Text("ナフサ不足", weight=ft.FontWeight.W_500),
                         ],
                     ),
                     padding=8,
@@ -613,16 +668,30 @@ def main(page: ft.Page):
         expand=True,
     )
 
-    page.add(
-        title_row,
-        trajectory_container,
-        closest_words_button,
-        count_row,
-        status_hint_container,
-        input_box,
-        last_input_container,
-        lv,
+    # ナフサ不足で画面全体の色を抜けるよう、1つの Container にまとめる
+    root_container = ft.Container(
+        content=ft.Column(
+            [
+                title_row,
+                trajectory_container,
+                closest_words_button,
+                count_row,
+                status_hint_container,
+                input_box,
+                last_input_container,
+                lv,
+            ],
+            expand=True,
+        ),
+        # 透明な部分があるとフィルターの色がそのまま出るため、ページと同じ背景色で塗る
+        bgcolor=ft.Colors.SURFACE,
+        # 端に元の色が残らないよう、ページの余白をこちらに移す
+        padding=10,
+        expand=True,
     )
+
+    page.padding = 0
+    page.add(root_container)
 
 if __name__ == "__main__":
     try:
