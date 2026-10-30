@@ -30,6 +30,7 @@ import time
 import functools
 import gzip
 import json
+import re
 from typing import List, Tuple, Dict, Set, Optional
 import os
 
@@ -273,6 +274,16 @@ def is_proper_noun(word: str) -> bool:
     # フォールバック: 判定不能なので False（=除外しない）
     return False
 
+# 英字（全角・アクセント付きを含む）と、かな・漢字
+LATIN_PATTERN = re.compile(r'[A-Za-zＡ-Ｚａ-ｚ\u00C0-\u024F]')
+JAPANESE_PATTERN = re.compile(r'[\u3040-\u30FF\u3400-\u9FFF\uF900-\uFAFF\uFF66-\uFF9F]')
+
+def is_alphabet_word(text: str) -> bool:
+    """ 英字を含み、かなも漢字も含まない語（英単語やローマ字表記）かを判定します。
+        'Tシャツ' や 'ICカード' のように日本語と混ざった語は対象外です。
+    """
+    return bool(LATIN_PATTERN.search(text)) and not JAPANESE_PATTERN.search(text)
+
 def has_emoji(text: str) -> bool:
     """ テキスト内に絵文字が含まれているかを判定します。 """
     for char in text:
@@ -357,14 +368,15 @@ def build_rank_list(model, target_word_surface: str) -> Tuple[str, List[Tuple[st
 
 
     # 類似語リストの生成
-    raw_top_list = model.most_similar(target_word, topn=TOP_N_CANDIDATES * 2)
+    # 除外する語が多いお題でも TOP_N_CANDIDATES 語が埋まるよう、多めに取る
+    raw_top_list = model.most_similar(target_word, topn=TOP_N_CANDIDATES * 3)
     
-    # トップリストからお題自体、固有名詞、絵文字、改行を含む語を除外
+    # トップリストからお題自体、固有名詞、絵文字、英字の語、改行を含む語を除外
     filtered_list = []
     for word, score in raw_top_list:
         if word == target_word:
             continue
-        if is_proper_noun(word) or has_emoji(word):
+        if is_proper_noun(word) or has_emoji(word) or is_alphabet_word(word):
             continue
         if '\n' in word or '\r' in word:
             continue
@@ -381,6 +393,9 @@ def build_rank_list(model, target_word_surface: str) -> Tuple[str, List[Tuple[st
 def check_guess(user_input: str, target_word: str, rank_map: Dict[str, int]) -> Dict[str, any]:
     """ ユーザーの入力単語をチェックし、結果（正規化単語、順位、正解/不正解）を返します。
     """
+    if is_alphabet_word(user_input):
+        return {'status': 'error', 'message': f"'{user_input}' は英字の単語のため使えません。", 'normalized': None}
+    
     candidates = get_word_candidates(user_input)
     
     if not candidates:
