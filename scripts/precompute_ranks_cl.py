@@ -21,11 +21,22 @@ import ja_contexto_system as game_logic
 
 
 def main():
+    # 必要なライブラリが無い場合は、モデルを読み込む前に止める
+    missing = []
+    if not game_logic.HAS_GENSIM:
+        missing.append("gensim")
+    if not game_logic.HAS_SUDACHI:
+        missing.append("sudachipy / sudachidict_core")
+    if missing:
+        sys.exit(f"次のライブラリを使えません: {', '.join(missing)}\n"
+                 f"実行中の Python: {sys.executable}\n"
+                 f"この Python にインストールされているか確認してください。")
+    if not os.path.exists(game_logic.MODEL_PATH):
+        sys.exit(f"モデルファイルがありません: {game_logic.MODEL_PATH}")
+
     model = game_logic.load_model()
     if not game_logic.MODEL_LOADED:
         sys.exit(f"モデルをロードできませんでした: {game_logic.MODEL_PATH}")
-    if not game_logic.HAS_SUDACHI:
-        sys.exit("Sudachi が使えないため、正規化と固有名詞の除外ができません。")
 
     out_dir = game_logic.RANK_DATA_DIR
     os.makedirs(out_dir, exist_ok=True)
@@ -37,16 +48,15 @@ def main():
     targets = []
     skipped = []
     start_time = time.time()
-    for surface in game_logic.FIXED_WORD_LIST:
-        target_word = game_logic.get_normalized_token(surface)
-        if any(t['word'] == target_word for t in targets):
-            continue  # 重複（正規化後に同じになるものを含む）
+    for surface in dict.fromkeys(game_logic.FIXED_WORD_LIST):
         try:
             target_word, top_rank_list = game_logic.build_rank_list(model, surface)
         except ValueError as e:
             print(f"スキップ: {e}")
             skipped.append(surface)
             continue
+        if any(t['word'] == target_word for t in targets):
+            continue  # 正規化後に同じ単語になるお題は1つにまとめる
 
         file_name = f"{len(targets):03d}.txt.gz"
         with gzip.open(os.path.join(out_dir, file_name), 'wt', encoding='utf-8') as f:
