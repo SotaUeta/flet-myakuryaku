@@ -1,6 +1,6 @@
 import ja_contexto_system as game_logic
 import flet as ft
-from typing import Set, Optional
+from typing import List, Optional, Set, Tuple
 import math
 import sys
 import traceback
@@ -74,6 +74,8 @@ def main(page: ft.Page):
     answer_count = 0
     hint_count = 0
     guessed_words: Set[str] = set()
+    # 推測した順の履歴（順位の推移グラフ用）。(単語, 順位, ヒントか) を持つ
+    guess_history: List[Tuple[str, int, bool]] = []
     game_clear = False
 
     #UI
@@ -138,6 +140,83 @@ def main(page: ft.Page):
             page.overlay.append(closest_words_dialog)
         closest_words_dialog.open = True
         page.update()
+
+    def rank_to_y(rank: int) -> float:
+        # 順位を対数にして上下を反転する（正解 5、10位 4、100位 3、… 圏外 0）
+        if rank <= 1:
+            return 5
+        if rank > game_logic.TOP_N_CANDIDATES:
+            return 0
+        return max(0.0, 5 - math.log10(rank))
+
+    trajectory_chart = ft.LineChart(
+        # 正解と圏外の点がグラフの端に重ならないよう、上下に余白を取る
+        min_y=-0.4,
+        max_y=5.3,
+        left_axis=ft.ChartAxis(
+            labels=[
+                ft.ChartAxisLabel(value=value, label=ft.Text(label, size=11))
+                for value, label in [(5, "正解"), (4, "10位"), (3, "100位"), (2, "1000位"), (1, "10000位"), (0, "圏外")]
+            ],
+            labels_size=56,
+            labels_interval=1,
+        ),
+        horizontal_grid_lines=ft.ChartGridLines(interval=1, color=ft.Colors.GREY_300, width=1),
+        tooltip_bgcolor=ft.Colors.BLUE_GREY_900,
+        height=180,
+    )
+    trajectory_container = ft.Container(
+        content=ft.Column(
+            [
+                ft.Row(
+                    [
+                        ft.Text("順位の推移", size=14, weight=ft.FontWeight.W_600),
+                        ft.Text("● 回答", size=11, color=ft.Colors.BLUE_700),
+                        ft.Text("■ ヒント", size=11, color=ft.Colors.AMBER_700),
+                    ],
+                    spacing=12,
+                ),
+                trajectory_chart,
+            ],
+            spacing=10,
+            horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
+        ),
+        padding=ft.padding.only(top=5, right=10),
+        visible=False,
+    )
+
+    def update_trajectory_chart():
+        n = len(guess_history)
+        points = []
+        for i, (word, rank, is_hint) in enumerate(guess_history, start=1):
+            if rank == 0:
+                rank_label = "正解"
+            elif rank > game_logic.TOP_N_CANDIDATES:
+                rank_label = "圏外"
+            else:
+                rank_label = f"{rank}位"
+            points.append(ft.LineChartDataPoint(
+                i,
+                rank_to_y(rank),
+                tooltip=f"{i}. {word}{'（ヒント）' if is_hint else ''}\n{rank_label}",
+                tooltip_style=ft.TextStyle(color=ft.Colors.WHITE, size=12),
+                point=(
+                    ft.ChartSquarePoint(size=9, color=ft.Colors.AMBER_700)
+                    if is_hint else ft.ChartCirclePoint(radius=4, color=ft.Colors.BLUE_700)
+                ),
+            ))
+        trajectory_chart.data_series = [ft.LineChartData(points, color=ft.Colors.BLUE_700, stroke_width=2)]
+        trajectory_chart.min_x = 0.5
+        trajectory_chart.max_x = n + 0.5
+        # 手数が多いときは横軸のラベルを 1, 5, 10, 15 … のように間引く
+        step = 1 if n <= 10 else 5 * math.ceil(n / 50)
+        label_xs = [1] + [i for i in range(step, n + 1, step) if i != 1]
+        trajectory_chart.bottom_axis = ft.ChartAxis(
+            labels=[ft.ChartAxisLabel(value=i, label=ft.Text(str(i), size=11)) for i in label_xs],
+            labels_size=24,
+            labels_interval=1,
+        )
+        trajectory_container.visible = n > 0
 
     def end_of_game_button(icon, label, on_click):
         return ft.TextButton(
@@ -219,6 +298,8 @@ def main(page: ft.Page):
             snack_bar.open = True
 
         page.update()
+        if e.control.data != 'yes':
+            input_box.focus()  # ゲームを続けるので、すぐ入力できるようにする
 
     confirm_give_up_dialog = ft.AlertDialog(
         modal=True,
@@ -262,6 +343,8 @@ def main(page: ft.Page):
             page.overlay.append(confirm_give_up_dialog)
             confirm_give_up_dialog.open = True
         page.update()
+        if e.control.data == "hint":
+            input_box.focus()  # メニューに移ったフォーカスを入力欄に戻す
 
     menu_button = ft.PopupMenuButton(
         icon=ft.Icons.MENU,
@@ -377,6 +460,7 @@ def main(page: ft.Page):
         answer_count = 0
         hint_count = 0
         guessed_words.clear()
+        guess_history.clear()
         game_clear = False
 
         count_text.value = f"回答回数: {answer_count}"
@@ -385,6 +469,7 @@ def main(page: ft.Page):
         status_hint_container.bgcolor = ft.Colors.CYAN_50
         status_hint_container.border = ft.border.all(2, ft.Colors.CYAN_700)
         closest_words_button.visible = False
+        trajectory_container.visible = False
         last_input_container.visible = False
         lv.controls.clear()
         input_box.value = ""
@@ -427,6 +512,11 @@ def main(page: ft.Page):
 
             guessed_words.add(normalized_input)
 
+            # ゲーム中の推測だけをグラフに残す（お手上げで追加する正解と、終了後の入力は除く）
+            gave_up = is_hint and result['status'] == 'correct'
+            if not game_clear and not gave_up:
+                guess_history.append((normalized_input, result['rank'], is_hint))
+
             if not is_hint and not game_clear:
                 answer_count += 1
 
@@ -442,6 +532,7 @@ def main(page: ft.Page):
                 status_message.value = f"🎉🎉🎉 {normalized_input}！お題の単語です！"
                 bg_color = ft.Colors.BLUE_100
                 closest_words_button.visible = True
+                update_trajectory_chart()
             elif result['status'] == 'incorrect_out_of_scope':
                 rank_display = f"圏外 ({game_logic.TOP_N_CANDIDATES}+位)"
                 sort_rank = game_logic.TOP_N_CANDIDATES + 2 # 圏外としてソート
@@ -524,6 +615,7 @@ def main(page: ft.Page):
 
     page.add(
         title_row,
+        trajectory_container,
         closest_words_button,
         count_row,
         status_hint_container,
