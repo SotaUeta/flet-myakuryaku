@@ -373,6 +373,12 @@ def check_guess(user_input: str, target_word: str, rank_map: Dict[str, int]) -> 
     if normalized_input is None:
         return {'status': 'error', 'message': f"'{user_input}' は解析できませんでした。", 'normalized': None}
     
+    return check_normalized_word(normalized_input, target_word, rank_map)
+
+def check_normalized_word(normalized_input: str, target_word: str, rank_map: Dict[str, int]) -> Dict[str, any]:
+    """ 正規化済みの単語（順位表の表記そのもの）を、正規化し直さずにチェックします。
+        ヒントやお手上げで順位表から取り出した単語に使います。
+    """
     if normalized_input == target_word:
         return {'status': 'correct', 'message': "🎉🎉🎉 正解です！", 'normalized': normalized_input, 'rank': 0}
     

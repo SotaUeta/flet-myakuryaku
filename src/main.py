@@ -200,8 +200,7 @@ def main(page: ft.Page):
         confirm_give_up_dialog.open = False
         
         if e.control.data == 'yes':
-            input_box.value = target_word  # 正解の単語を入力欄にセット
-            add_item_to_list(e, is_hint=True)  # 引数を渡す
+            add_item_to_list(e, is_hint=True, known_word=target_word)  # 正解の単語を追加
             # 「はい」が押されたときのギブアップ処理
             game_clear = True
             
@@ -254,8 +253,7 @@ def main(page: ft.Page):
             if hint_word:
                 hint_count +=1
                 hint_text.value = f"ヒント回数: {hint_count}"
-                input_box.value = hint_word
-                add_item_to_list(None, is_hint=True)
+                add_item_to_list(None, is_hint=True, known_word=hint_word)
             else:
                 snack_bar = ft.SnackBar(ft.Text("⚠️ これ以上、未回答の単語からヒントを提供できません。"))
                 page.overlay.append(snack_bar)
@@ -396,15 +394,20 @@ def main(page: ft.Page):
     def update_status_visibility():
         status_hint_container.visible = status_message.value.strip() != ""
 
-    def add_item_to_list(e, is_hint: bool = False):
+    def add_item_to_list(e, is_hint: bool = False, known_word: Optional[str] = None):
         nonlocal answer_count
         nonlocal game_clear
 
-        current_input = input_box.value.strip()
+        # known_word はヒント・お手上げで順位表から取り出した単語。入力欄の値の代わりに使う
+        current_input = known_word if known_word is not None else input_box.value.strip()
 
         if current_input:
 
-            result = game_logic.check_guess(current_input, target_word, rank_map)
+            if known_word is not None:
+                # 正規化し直すと別の単語になることがある（例: 'たつた' → 'たつ'）ため、そのまま判定する
+                result = game_logic.check_normalized_word(known_word, target_word, rank_map)
+            else:
+                result = game_logic.check_guess(current_input, target_word, rank_map)
             normalized_input = result['normalized']
 
             if result['status'] == 'error':
