@@ -274,6 +274,13 @@ def main(page: ft.Page):
             
         return None # 適切なヒントが見つからなかった場合
 
+    # スナックバーは1つだけ作って使い回す（表示のたびに追加すると、閉じたあとも page に溜まっていくため）
+    snack_bar = ft.SnackBar(ft.Text(""))
+
+    def show_snack(message: str):
+        snack_bar.content.value = message
+        page.open(snack_bar)  # まだ page に無いときだけ追加して表示する
+
     def close_dialog(e: ft.ControlEvent):
         nonlocal game_clear
         
@@ -286,18 +293,14 @@ def main(page: ft.Page):
             game_clear = True
             
             # スナックバーと状態メッセージの更新
-            snack_bar = ft.SnackBar(ft.Text(f"🏳️ お手上げ！正解は '{target_word}' でした。"))
-            page.overlay.append(snack_bar)
-            snack_bar.open = True
+            show_snack(f"🏳️ お手上げ！正解は '{target_word}' でした。")
             
             status_message.value = f"🏳️ お手上げしました。正解は '{target_word}' です。"
             status_hint_container.bgcolor = ft.Colors.AMBER_100
             status_hint_container.border = ft.border.all(2, ft.Colors.AMBER_700)
             closest_words_button.visible = True
         else:
-            snack_bar = ft.SnackBar(ft.Text("ゲーム続行！"))
-            page.overlay.append(snack_bar)
-            snack_bar.open = True
+            show_snack("ゲーム続行！")
 
         page.update()
         if e.control.data != 'yes':
@@ -317,10 +320,8 @@ def main(page: ft.Page):
     def handle_menu_click(e: ft.ControlEvent):
         nonlocal hint_count
         if game_clear:
-            page.snack_bar = ft.SnackBar(ft.Text("✅ ゲームは既にクリアしています。"))
-            page.snack_bar.open = True
-            page.update()
-            return         
+            show_snack("✅ ゲームは既にクリアしています。")
+            return
         if e.control.data == "hint":
             min_rank = None
             # guessed_wordsに含まれる単語の順位を取得し、最小値を求める
@@ -338,8 +339,7 @@ def main(page: ft.Page):
                 hint_text.value = f"ヒント回数: {hint_count}"
                 add_item_to_list(None, is_hint=True, known_word=hint_word)
             else:
-                snack_bar = ft.SnackBar(ft.Text("⚠️ これ以上、未回答の単語からヒントを提供できません。"))
-                page.overlay.append(snack_bar)
+                show_snack("⚠️ これ以上、未回答の単語からヒントを提供できません。")
         elif e.control.data == "give_up":
             # 同じダイアログを2回追加すると、閉じたあとも見えないダイアログが残って操作できなくなるため、1回だけ追加する
             if confirm_give_up_dialog not in page.overlay:
